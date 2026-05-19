@@ -3630,11 +3630,7 @@ int main(int argc, char *argv[])
          fprintf( stderr, "%s: --use-gpu is only supported with argon2id1024 algo\n", argv[0] );
          show_usage_and_exit(1);
       }
-      if ( !have_stratum )
-      {
-         fprintf( stderr, "%s: --use-gpu requires stratum protocol\n", argv[0] );
-         show_usage_and_exit(1);
-      }
+
 
       int gpu_device_count = check_gpu_capability( use_gpu, gpu_id,
                                                    gpu_batch_size,

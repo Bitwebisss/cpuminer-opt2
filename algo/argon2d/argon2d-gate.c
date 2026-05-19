@@ -263,9 +263,9 @@ int scanhash_argon2id1024_gpu( struct work *work, uint32_t max_nonce,
     argon2_gpu_hasher_thread *td = get_gpu_thread_data( thr_id );
     uint32_t *pdata   = work->data;
     uint32_t *ptarget = work->target;
-    const uint32_t Htarg       = ptarget[7];
     const uint32_t first_nonce = pdata[19];
     uint32_t n = first_nonce;
+    const bool bench = opt_benchmark;
 
     v128_bswap32_80( td->endiandata, pdata );
 
@@ -275,18 +275,16 @@ int scanhash_argon2id1024_gpu( struct work *work, uint32_t max_nonce,
         for ( int i = 0; i < gpu_batch_size; i++ )
         {
             uint32_t *vh = td->vhash + 8 * i;
-            if ( vh[7] <= Htarg && fulltest( vh, ptarget ) )
+            if ( unlikely( valid_hash( vh, ptarget ) && !bench ) )
             {
-                *hashes_done = n - first_nonce;
-                pdata[19] = n;
-                work_set_target_ratio( work, vh );
-                return 1;
+                be32enc( &pdata[19], n );
+                submit_solution( work, vh, mythr );
             }
             n++;
         }
     } while ( n < max_nonce && !work_restart[thr_id].restart );
 
-    *hashes_done = n - first_nonce + 1;
+    *hashes_done = n - first_nonce;
     pdata[19] = n;
     return 0;
 }
