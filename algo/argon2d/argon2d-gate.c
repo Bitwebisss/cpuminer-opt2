@@ -247,10 +247,63 @@ void argon2id1024_hash( void *output, const void *input )
                 rc, argon2_error_message( rc ) );
 }
 
-bool register_argon2id1024_algo( algo_gate_t* gate )
+
+#ifdef USE_GPU
+#include "gpu_gate/argon2d-gpu-gate.h"
+
+bool init_thread_argon2id1024( int thr_id )
 {
-    gate->scanhash = (void*)&scanhash_argon2d;
-    gate->hash     = (void*)&argon2id1024_hash;
+    return init_thread_argon2id1024_gpu( thr_id );
+}
+
+int scanhash_argon2id1024_gpu( struct work *work, uint32_t max_nonce,
+                                uint64_t *hashes_done,
+                                struct thr_info *mythr )
+{
+    const int thr_id = mythr->id;
+    argon2_gpu_hasher_thread *td = get_gpu_thread_data( thr_id );
+    uint32_t *pdata   = work->data;
+    uint32_t *ptarget = work->target;
+    const uint32_t Htarg       = ptarget[7];
+    const uint32_t first_nonce = pdata[19];
+    uint32_t n = first_nonce;
+
+    v128_bswap32_80( td->endiandata, pdata );
+    do {
+        td->endiandata[19] = n;
+        gpu_argon2_raw_hash( td );
+        for ( int i = 0; i < gpu_batch_size; i++ )
+        {
+            uint32_t *vh = td->vhash + 8 * i;
+            if ( vh[7] <= Htarg && fulltest( vh, ptarget ) )
+            {
+                *hashes_done = n - first_nonce;
+                pdata[19] = n;
+                work_set_target_ratio( work, vh );
+                return 1;
+            }
+            n++;
+        }
+    } while ( n < max_nonce && !work_restart[thr_id].restart );
+
+    *hashes_done = n - first_nonce + 1;
+    pdata[19] = n;
+    return 0;
+}
+#endif
+
+bool register_argon2id1024_algo( algo_gate_t *gate )
+{
+    gate->hash        = (void*)&argon2id1024_hash;
     opt_target_factor = 65536.0;
+#ifdef USE_GPU
+    if ( use_gpu != NULL )
+    {
+        gate->miner_thread_init = (void*)&init_thread_argon2id1024;
+        gate->scanhash          = (void*)&scanhash_argon2id1024_gpu;
+        return true;
+    }
+#endif
+    gate->scanhash = (void*)&scanhash_argon2d;
     return true;
 }

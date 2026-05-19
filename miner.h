@@ -1061,6 +1061,11 @@ static struct option const options[] = {
         { "stratum-keepalive", 0, NULL, 1029 },
         { "version", 0, NULL, 'V' },
         { "bell", 0, NULL, 1031 },
+#ifdef USE_GPU
+        { "use-gpu",       1, NULL, 1070 },
+        { "gpu-id",        1, NULL, 1071 },
+        { "gpu-batchsize", 1, NULL, 1072 },
+#endif
         { 0, 0, 0, 0 }
 };
 

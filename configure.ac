@@ -131,6 +131,27 @@ AC_SUBST(PTHREAD_FLAGS)
 AC_SUBST(PTHREAD_LIBS)
 AC_SUBST(WS2_LIBS)
 
+# GPU mining via pre-built mm_gpu_gate shared library
+AC_ARG_ENABLE([gpu],
+  AS_HELP_STRING([--enable-gpu], [enable GPU mining (argon2 algos only)]))
+
+AC_ARG_WITH([mm-gpu-gate],
+  AS_HELP_STRING([--with-mm-gpu-gate=PATH],
+    [directory containing libmm_gpu_gate.so (build it first with cmake in algo/argon2d/gpu_gate/)]))
+
+if test x$enable_gpu = xyes; then
+  if test -z "$with_mm_gpu_gate"; then
+    AC_MSG_ERROR([--enable-gpu requires --with-mm-gpu-gate=PATH to pre-built mm_gpu_gate])
+  fi
+  MM_GPU_GATE_DIR="$with_mm_gpu_gate"
+  AC_CHECK_FILE([$MM_GPU_GATE_DIR/libmm_gpu_gate.so], [],
+    [AC_MSG_ERROR([libmm_gpu_gate.so not found in $MM_GPU_GATE_DIR, build it first with cmake])])
+  AC_SUBST(MM_GPU_GATE_DIR)
+  AC_DEFINE([USE_GPU], [1], [GPU mining support enabled])
+fi
+
+AM_CONDITIONAL([WANT_GPU], [test x$enable_gpu = xyes])
+
 AC_CONFIG_FILES([
 	Makefile
 	compat/Makefile

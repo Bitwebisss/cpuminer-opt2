@@ -175,6 +175,13 @@ uint64_t net_blocks = 0;
 uint32_t opt_work_size = 0;
 bool     opt_bell = false;
 
+// GPU mining (argon2 algos only, requires mm_gpu_gate shared library)
+#ifdef USE_GPU
+char *use_gpu       = NULL;   // "CUDA" or "OPENCL", NULL = CPU mode
+char *gpu_id        = NULL;   // specific GPU device id, NULL = auto
+int   gpu_batch_size = 1;     // hashes per GPU batch
+#endif
+
 // conditional mining
 bool *conditional_state = NULL;
 //bool conditional_state[MAX_CPUS] = { 0 };
@@ -3405,6 +3412,24 @@ void parse_arg(int key, char *arg )
    case 1029:  // stratum-keepalive
       opt_stratum_keepalive = true;
       break;
+#ifdef USE_GPU
+   case 1070:  // --use-gpu
+      if ( arg && strncasecmp( arg, "CUDA", 4 ) == 0 )
+         use_gpu = strdup( "CUDA" );
+      else if ( arg && strncasecmp( arg, "OPENCL", 6 ) == 0 )
+         use_gpu = strdup( "OPENCL" );
+      else
+         show_usage_and_exit(1);
+      break;
+   case 1071:  // --gpu-id
+      gpu_id = strdup( arg );
+      break;
+   case 1072:  // --gpu-batchsize
+      gpu_batch_size = atoi( arg );
+      if ( gpu_batch_size < 1 )
+         show_usage_and_exit(1);
+      break;
+#endif
    case 'V':   // version
       display_cpu_capability();
       exit(0);
@@ -3593,6 +3618,42 @@ int main(int argc, char *argv[])
    // optimizations but no logging, second part does any logging.   
    if ( !register_algo_gate( opt_algo, &algo_gate ) )  exit(1);
 
+#ifdef USE_GPU
+   // GPU is only supported for argon2 family
+   if ( use_gpu != NULL )
+   {
+      if ( opt_algo != ALGO_ARGON2D16000
+        && opt_algo != ALGO_ARGON2D4096
+        && opt_algo != ALGO_ARGON2D500
+        && opt_algo != ALGO_ARGON2D250
+        && opt_algo != ALGO_ARGON2ID1024 )
+      {
+         fprintf( stderr, "%s: --use-gpu is only supported with argon2 algos\n",
+                  argv[0] );
+         show_usage_and_exit(1);
+      }
+      if ( !have_stratum )
+      {
+         fprintf( stderr, "%s: --use-gpu requires stratum protocol\n", argv[0] );
+         show_usage_and_exit(1);
+      }
+   }
+
+   if ( use_gpu != NULL )
+   {
+      extern int check_gpu_capability( char*, char*, int, int );
+      int gpu_device_count = check_gpu_capability( use_gpu, gpu_id,
+                                                   gpu_batch_size,
+                                                   opt_n_threads );
+      if ( gpu_device_count <= 0 )
+      {
+         fprintf( stderr, "%s: no usable GPU device found\n", argv[0] );
+         exit(1);
+      }
+      opt_n_threads = opt_n_threads * gpu_device_count;
+   }
+   else
+#endif
    if ( !check_cpu_capability() ) exit(1);
    
 	if ( !opt_benchmark )
