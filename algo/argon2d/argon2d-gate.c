@@ -261,6 +261,7 @@ int scanhash_argon2id1024_gpu( struct work *work, uint32_t max_nonce,
 {
     const int thr_id = mythr->id;
     argon2_gpu_hasher_thread *td = get_gpu_thread_data( thr_id );
+
     uint32_t *pdata   = work->data;
     uint32_t *ptarget = work->target;
     const uint32_t first_nonce = pdata[19];

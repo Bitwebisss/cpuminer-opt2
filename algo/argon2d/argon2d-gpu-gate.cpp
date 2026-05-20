@@ -124,18 +124,21 @@ void gpu_argon2_raw_hash(argon2_gpu_hasher_thread *thread_data) {
 
 bool init_thread_argon2id1024_gpu( int thr_id )
 {
-    return init_gpu<cuda::GlobalContext, cuda::ProgramContext, cuda::ProcessingUnit>(
-        thr_id, Bweb,
-        ARGON2_ID,
-        ARGON2_VERSION_13,
-        new Argon2Params( 32,
-            nullptr, 0,
-            nullptr, 0,
-            nullptr, 0,
-            3,     // t_cost
-            1024,  // m_cost KiB
-            1 )    // lanes
-    );
+    Argon2Params *params = new Argon2Params( 32,
+        nullptr, 0,
+        nullptr, 0,
+        nullptr, 0,
+        3,     // t_cost
+        1024,  // m_cost KiB
+        1 );   // lanes
+
+    if ( use_gpu != NULL && use_gpu[0] == 'C' ) {
+        return init_gpu<cuda::GlobalContext, cuda::ProgramContext, cuda::ProcessingUnit>(
+            thr_id, Bweb, ARGON2_ID, ARGON2_VERSION_13, params );
+    } else {
+        return init_gpu<opencl::GlobalContext, opencl::ProgramContext, opencl::ProcessingUnit>(
+            thr_id, Bweb, ARGON2_ID, ARGON2_VERSION_13, params );
+    }
 }
 
 argon2_gpu_hasher_thread *get_gpu_thread_data(int thr_id) {
