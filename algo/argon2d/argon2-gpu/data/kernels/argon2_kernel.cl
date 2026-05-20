@@ -1258,6 +1258,106 @@ void argon2_genseed_generic(__local uint *initHash, __global uint *seed, int job
     }
 }
 
+/*
+ * Bweb (argon2id, t=3, m=1024, p=1, v=0x13) preseed:
+ *
+ * Computes H0 = Blake2b-512(p=1 || T=32 || m=1024 || t=3 || v=0x13 || y=2 ||
+ *                            |pwd|=80 || pwd[0..79] ||
+ *                            |salt|=80 || salt[0..79] ||
+ *                            |K|=0 || |X|=0)
+ * where pwd == salt == block header (80 bytes), and
+ * pwd[19] = salt[19] = seed[19] + job_id  (per-job nonce).
+ *
+ * All lengths in this blake2b implementation are in uint32 (4-byte) units.
+ * Working memory layout inside initHash (120 uint32s = 480 bytes per lane_thr):
+ *   initHash[0..15]  : H0 output (written by blake2b_final_local)
+ *   initHash[16..17] : idx, lane  (filled by caller after genseed returns)
+ *   initHash[20..]   : blake2b state: h[10], shfl[16], buf[32] ulongs
+ */
+void argon2_genseed_bweb(__local uint *initHash, __global uint *seed, int job_id, int thr_id) {
+    /* blake2b working memory — same region that blake2b_digestLong_local uses */
+    __local ulong *h    = (__local ulong *)&initHash[20];      /* 10 ulongs: state    */
+    __local ulong *shfl = h + 10;                               /* 16 ulongs: shuffle  */
+    __local uint  *buf  = (__local uint *)(shfl + 16);          /* 32 uint32s: staging */
+
+    /* ---- Init blake2b for 16 uint32 (64-byte) output ---- */
+    blake2b_init(h, 16, thr_id);
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    int buf_len = 0;
+
+    /*
+     * Feed argon2id fixed params (7 uint32s = 28 bytes):
+     *   [parallelism=1, taglen=32, m_cost=1024, t_cost=3,
+     *    version=0x13,  type=2,    pwdlen=80]
+     * Write 4 + 3 uint32s directly into buf using all 4 threads.
+     * buf[7] (written by thr_id==3 in second group) is a dummy that
+     * won't be counted (buf_len = 7).
+     */
+    buf[0 + thr_id] = (thr_id == 0) ? 1u
+                    : (thr_id == 1) ? 32u
+                    : (thr_id == 2) ? 1024u
+                    :                 3u;
+    buf[4 + thr_id] = (thr_id == 0) ? 0x13u
+                    : (thr_id == 1) ? 2u
+                    : (thr_id == 2) ? 80u
+                    :                 0u; /* dummy, not counted */
+    buf_len = 7;
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+
+    /*
+     * Feed pwd[0..18] (19 uint32s = 76 bytes) from seed.
+     * 7 + 19 = 26 <= 32  →  no compress yet.
+     */
+    buf_len = blake2b_update_global(seed, 19, h, buf, buf_len, shfl, thr_id);
+    /* buf_len == 26 */
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+
+    /* Feed pwd[19] = per-job nonce = seed[19] + job_id */
+    if (thr_id == 0) buf[buf_len] = seed[19] + (uint)job_id;
+    buf_len++;               /* all threads increment their private copy */
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    /* buf_len == 27 */
+
+    /* Feed saltlen = 80 */
+    if (thr_id == 0) buf[buf_len] = 80u;
+    buf_len++;
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    /* buf_len == 28 */
+
+    /*
+     * Feed salt[0..18] (same header, 19 uint32s).
+     * 28 + 19 = 47 > 32  →  compresses first block, buf_len becomes 15.
+     */
+    buf_len = blake2b_update_global(seed, 19, h, buf, buf_len, shfl, thr_id);
+    /* buf_len == 15 */
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+
+    /* Feed salt[19] = same nonce */
+    if (thr_id == 0) buf[buf_len] = seed[19] + (uint)job_id;
+    buf_len++;
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    /* buf_len == 16 */
+
+    /* Feed secretlen = 0 */
+    if (thr_id == 0) buf[buf_len] = 0u;
+    buf_len++;
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    /* buf_len == 17 */
+
+    /* Feed adlen = 0 */
+    if (thr_id == 0) buf[buf_len] = 0u;
+    buf_len++;
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    /* buf_len == 18  (total: 7+20+1+20+1+1 = 50 uint32s = 200 bytes) */
+
+    /*
+     * Finalize: compress last block (18 uint32s = 72 bytes) and
+     * write H0 (16 uint32s = 64 bytes) to initHash[0..15].
+     * Total hashed: 128 + 72 = 200 bytes. ✓
+     */
+    blake2b_final_local(initHash, 16, h, buf, buf_len, shfl, thr_id);
+}
+
 __kernel void argon2_kernel_preseed(uint algo,
         __global struct block_g *memory, __global uint *seed, uint lanes, uint segment_blocks,
 		__global uint *secret, uint secretLen, __global uint *ad, uint adLen,
@@ -1270,9 +1370,9 @@ __kernel void argon2_kernel_preseed(uint algo,
 
     __local uint *initHash = (__local uint *)&blake_shared[lane_thr * 60];
 
-    if(algo == 6) { // Bweb
-        argon2_genseed_generic(initHash, seed, job_id, thr_id);
-    } else {
+    if (algo == 6) { /* Bweb: compute H0 from block header on GPU */
+        argon2_genseed_bweb(initHash, seed, job_id, thr_id);
+    } else {         /* None: CPU pre-computed H0, just copy it     */
         argon2_genseed_generic(initHash, seed, job_id, thr_id);
     }
 
