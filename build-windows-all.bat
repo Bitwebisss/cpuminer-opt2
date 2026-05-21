@@ -1,0 +1,139 @@
+@echo off
+setlocal
+
+echo ============================================================
+echo  cpuminer-opt3 Windows Build
+echo  Stage 1: VS2019 + CUDA  -^>  libmm_gpu_gate.dll
+echo  Stage 2: MSYS2 UCRT64  -^>  cpuminer*.exe
+echo ============================================================
+echo.
+
+set "VS_VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+set "MSBUILD=C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
+set "MSYS2_BASH=C:\msys64\usr\bin\bash.exe"
+set "GENDEF=C:\msys64\ucrt64\bin\gendef.exe"
+set "DLLTOOL=C:\msys64\ucrt64\bin\dlltool.exe"
+
+set "PROJECT=%~dp0"
+if "%PROJECT:~-1%"=="\" set "PROJECT=%PROJECT:~0,-1%"
+set "GPU_SRC=%PROJECT%\algo\argon2d\argon2-gpu"
+set "GPU_BUILD=%GPU_SRC%\build_vs"
+set "GPU_OUT=%GPU_BUILD%\Release"
+
+echo Project:   %PROJECT%
+echo CUDA_PATH: %CUDA_PATH%
+echo.
+
+echo [CHECK] VS2019...
+if not exist "%VS_VCVARS%" echo MISSING: %VS_VCVARS%
+if not exist "%VS_VCVARS%" goto :fail
+
+echo [CHECK] MSBuild...
+if not exist "%MSBUILD%" echo MISSING: %MSBUILD%
+if not exist "%MSBUILD%" goto :fail
+
+echo [CHECK] CUDA_PATH env var...
+if "%CUDA_PATH%"=="" echo MISSING: CUDA_PATH not set -- run prereq step first
+if "%CUDA_PATH%"=="" goto :fail
+
+echo [CHECK] CUDA nvcc...
+if not exist "%CUDA_PATH%\bin\nvcc.exe" echo MISSING: %CUDA_PATH%\bin\nvcc.exe
+if not exist "%CUDA_PATH%\bin\nvcc.exe" goto :fail
+
+echo [CHECK] OpenCL.lib...
+if not exist "%CUDA_PATH%\lib\x64\OpenCL.lib" echo MISSING: %CUDA_PATH%\lib\x64\OpenCL.lib
+if not exist "%CUDA_PATH%\lib\x64\OpenCL.lib" goto :fail
+
+echo [CHECK] MSYS2...
+if not exist "%MSYS2_BASH%" echo MISSING: %MSYS2_BASH%
+if not exist "%MSYS2_BASH%" goto :fail
+
+echo [CHECK] gendef...
+if not exist "%GENDEF%" echo MISSING: %GENDEF%
+if not exist "%GENDEF%" goto :fail
+
+echo [CHECK] dlltool...
+if not exist "%DLLTOOL%" echo MISSING: %DLLTOOL%
+if not exist "%DLLTOOL%" goto :fail
+
+echo [CHECK] argon2-gpu submodule...
+if not exist "%GPU_SRC%\CMakeLists.txt" echo MISSING: %GPU_SRC%\CMakeLists.txt
+if not exist "%GPU_SRC%\CMakeLists.txt" goto :fail
+
+echo [CHECK] build-windows-stage2.sh...
+if not exist "%PROJECT%\build-windows-stage2.sh" echo MISSING: %PROJECT%\build-windows-stage2.sh
+if not exist "%PROJECT%\build-windows-stage2.sh" goto :fail
+
+echo All checks passed.
+echo.
+
+echo [2/5] Loading VS2019 x64 environment...
+call "%VS_VCVARS%"
+if errorlevel 1 echo ERROR: vcvars64.bat failed
+if errorlevel 1 goto :fail
+echo [2/5] Done.
+echo.
+
+set "CUDA_PATH_FWD=%CUDA_PATH:\=/%"
+set "GPU_SRC_FWD=%GPU_SRC:\=/%"
+
+echo [3/5] cmake configure...
+if exist "%GPU_BUILD%" rmdir /s /q "%GPU_BUILD%"
+mkdir "%GPU_BUILD%"
+cd /d "%GPU_BUILD%"
+cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCUDA_TOOLKIT_ROOT_DIR="%CUDA_PATH_FWD%" -DOpenCL_LIBRARY="%CUDA_PATH_FWD%/lib/x64/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%CUDA_PATH_FWD%/include"
+if errorlevel 1 echo ERROR: cmake failed
+if errorlevel 1 goto :fail
+echo [3/5] cmake OK.
+echo.
+
+echo [4/5] MSBuild...
+"%MSBUILD%" argon2-gpu.sln /t:mm_gpu_gate /p:Configuration=Release /p:Platform=x64 /m
+if errorlevel 1 echo ERROR: MSBuild failed
+if errorlevel 1 goto :fail
+if not exist "%GPU_OUT%\libmm_gpu_gate.dll" echo ERROR: libmm_gpu_gate.dll not produced
+if not exist "%GPU_OUT%\libmm_gpu_gate.dll" goto :fail
+
+echo [4/5] gendef...
+cd /d "%GPU_OUT%"
+"%GENDEF%" libmm_gpu_gate.dll
+if errorlevel 1 echo ERROR: gendef failed
+if errorlevel 1 goto :fail
+
+echo [4/5] dlltool...
+"%DLLTOOL%" -d libmm_gpu_gate.def -D libmm_gpu_gate.dll -l libmm_gpu_gate.dll.a
+if errorlevel 1 echo ERROR: dlltool failed
+if errorlevel 1 goto :fail
+if not exist "%GPU_OUT%\libmm_gpu_gate.dll.a" echo ERROR: libmm_gpu_gate.dll.a not produced
+if not exist "%GPU_OUT%\libmm_gpu_gate.dll.a" goto :fail
+
+echo [4/5] Stage 1 complete.
+echo   DLL:        %GPU_OUT%\libmm_gpu_gate.dll
+echo   Import lib: %GPU_OUT%\libmm_gpu_gate.dll.a
+echo.
+
+echo [5/5] Stage 2 via MSYS2...
+cd /d "%PROJECT%"
+set "GPU_OUT_FWD=%GPU_OUT:\=/%"
+set "PROJ_FWD=%PROJECT:\=/%"
+"%MSYS2_BASH%" --login -c "export PATH=/ucrt64/bin:/usr/bin:$PATH && PROJ=$(cygpath -u "%PROJ_FWD%") && GPU=$(cygpath -u "%GPU_OUT_FWD%") && export CPUMINER_GPU_GATE_WIN=$GPU && bash \"$PROJ/build-windows-stage2.sh\" \"$PROJ\""
+if errorlevel 1 echo ERROR: Stage 2 MSYS2 build failed
+if errorlevel 1 goto :fail
+
+echo.
+echo ============================================================
+echo  BUILD COMPLETE
+echo  GPU archive:    cpuminer-windows-gpu.zip
+echo  No-GPU archive: cpuminer-windows-nogpu.zip
+echo ============================================================
+echo.
+pause
+goto :eof
+
+:fail
+echo.
+echo ============================================================
+echo  BUILD FAILED - read error above
+echo ============================================================
+echo.
+pause
