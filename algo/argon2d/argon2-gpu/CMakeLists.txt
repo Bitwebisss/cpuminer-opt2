@@ -13,6 +13,7 @@ find_package(OpenCL)
 # ============================================================
 #  CUDA — legacy FindCUDA (works with VS 2019 + CUDA 11.8)
 # ============================================================
+cmake_policy(SET CMP0146 OLD)
 set(CUDA_FOUND FALSE)
 if(NOT NO_CUDA)
     find_package(CUDA)
