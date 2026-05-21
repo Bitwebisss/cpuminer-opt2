@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.27)
+cmake_minimum_required(VERSION 3.5)
 
 project(argon2-gpu CXX)
 set(CMAKE_CXX_STANDARD 11)
@@ -13,8 +13,6 @@ find_package(OpenCL)
 # ============================================================
 #  CUDA — legacy FindCUDA (works with VS 2019 + CUDA 11.8)
 # ============================================================
-cmake_policy(SET CMP0146 OLD)
-cmake_policy(SET CMP0147 OLD)
 set(CUDA_FOUND FALSE)
 if(NOT NO_CUDA)
     find_package(CUDA)
