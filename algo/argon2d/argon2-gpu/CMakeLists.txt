@@ -1,98 +1,136 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.18...3.27)
 
 project(argon2-gpu CXX)
-set(CMAKE_CXX_STANDARD 11)
+
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ============================================================
+#  MSVC runtime: MultiThreadedDLL (/MD) to prevent LNK2038.
+#  Must be set BEFORE enable_language(CUDA) so nvcc inherits it.
+# ============================================================
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+endif()
+
+# ============================================================
 #  OpenCL
+#  Caller passes: -DOpenCL_LIBRARY=... -DOpenCL_INCLUDE_DIR=...
+#  find_package(OpenCL) consumes those variables as hints directly.
 # ============================================================
-find_package(OpenCL)
+find_package(OpenCL REQUIRED)
 
 # ============================================================
-#  CUDA — legacy FindCUDA (works with VS 2019 + CUDA 11.8)
+#  CUDA (modern CUDAToolkit, requires CMake 3.17+)
+#
+#  Caller passes: -DCUDA_TOOLKIT_ROOT_DIR=...
+#  find_package(CUDAToolkit) officially honours CUDA_TOOLKIT_ROOT_DIR
+#  as a search hint alongside CUDAToolkit_ROOT and CUDA_PATH.
+#
+#  Caller passes: -DNO_CUDA=FALSE to enable GPU build.
 # ============================================================
-set(CUDA_FOUND FALSE)
+set(HAVE_CUDA FALSE)
+
 if(NOT NO_CUDA)
-    find_package(CUDA)
+    find_package(CUDAToolkit QUIET)
+    if(CUDAToolkit_FOUND)
+        # Target GPU architectures (same as original -gencode flags):
+        #   61        Pascal   (GTX 10xx)
+        #   75        Turing   (RTX 20xx, GTX 16xx)
+        #   80        Ampere   (A100)
+        #   86-real   Ampere RTX 30xx  (binary code)
+        #   86-virtual PTX for forward compatibility (was compute_86,compute_86)
+        set(CMAKE_CUDA_ARCHITECTURES 61 75 80 86-real 86-virtual)
+        enable_language(CUDA)
+        set(HAVE_CUDA TRUE)
+        message(STATUS "CUDA ${CUDAToolkit_VERSION} found -- GPU build enabled")
+        add_compile_definitions(HAVE_CUDA=1)
+    else()
+        message(STATUS "CUDAToolkit not found -- building without CUDA")
+        add_compile_definitions(HAVE_CUDA=0)
+    endif()
 endif()
 
-if(CUDA_FOUND)
-    message(STATUS "Using CUDA version ${CUDA_VERSION}")
-    add_definitions(-DHAVE_CUDA=1)
-
-    set(ARGON2_CUDA_GENCODE
-        -gencode arch=compute_61,code=sm_61
-        -gencode arch=compute_75,code=sm_75
-        -gencode arch=compute_80,code=sm_80
-        -gencode arch=compute_86,code=sm_86
-        -gencode arch=compute_86,code=compute_86
-    )
-
-    if(MSVC OR WIN32)
-        set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
-            -std=c++17 -O3 --ptxas-options=-v -lineinfo
-            ${ARGON2_CUDA_GENCODE}
-        )
-    else()
-        set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
-            -std=c++17 --compiler-options=-fPIC -O3 --ptxas-options=-v -lineinfo
-            ${ARGON2_CUDA_GENCODE}
-        )
-    endif()
-else()
+if(NOT HAVE_CUDA)
+    add_compile_definitions(HAVE_CUDA=0)
     message(STATUS "Building without CUDA support")
-    add_definitions(-DHAVE_CUDA=0)
 endif()
 
 # ============================================================
-#  Static helper libraries
+#  CUDA compiler flags (replaces legacy CUDA_NVCC_FLAGS).
+#  Applied only to .cu files via COMPILE_LANGUAGE:CUDA generator expression.
+# ============================================================
+if(HAVE_CUDA)
+    set(CUDA_EXTRA_FLAGS -O3 --ptxas-options=-v -lineinfo)
+    if(MSVC)
+        # Force nvcc to use the same dynamic CRT (/MD) as the rest of the project.
+        list(APPEND CUDA_EXTRA_FLAGS -Xcompiler=/MD)
+    else()
+        list(APPEND CUDA_EXTRA_FLAGS --compiler-options=-fPIC)
+    endif()
+endif()
+
+# ============================================================
+#  argon2-gpu-common
 # ============================================================
 add_library(argon2-gpu-common STATIC
     lib/argon2-gpu-common/argon2params.cpp
     lib/argon2-gpu-common/blake2b.cpp
 )
-target_include_directories(argon2-gpu-common INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+target_include_directories(argon2-gpu-common
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE
+        include/argon2-gpu-common
+        lib/argon2-gpu-common
 )
-target_include_directories(argon2-gpu-common PRIVATE
-    include/argon2-gpu-common
-    lib/argon2-gpu-common
-)
-include_directories(include)
 
 # ============================================================
-#  CUDA backend
+#  argon2-cuda -- CUDA backend or stub
 # ============================================================
-if(CUDA_FOUND)
-    cuda_add_library(argon2-cuda STATIC
+if(HAVE_CUDA)
+    add_library(argon2-cuda STATIC
         lib/argon2-cuda/device.cpp
         lib/argon2-cuda/globalcontext.cpp
         lib/argon2-cuda/programcontext.cpp
         lib/argon2-cuda/processingunit.cpp
         lib/argon2-cuda/kernels.cu
     )
-    include_directories(${CUDA_INCLUDE_DIRS})
+    set_target_properties(argon2-cuda PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED ON
+        CUDA_SEPARABLE_COMPILATION OFF
+    )
+    target_compile_options(argon2-cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_EXTRA_FLAGS}>
+    )
+    target_include_directories(argon2-cuda PRIVATE
+        ${CUDAToolkit_INCLUDE_DIRS}
+        include/argon2-cuda
+        lib/argon2-cuda
+    )
+    target_link_libraries(argon2-cuda
+        PUBLIC  argon2-gpu-common
+        PRIVATE CUDA::cudart
+    )
 else()
     add_library(argon2-cuda STATIC
         lib/argon2-cuda/nocuda.cpp
     )
+    target_include_directories(argon2-cuda PRIVATE
+        include/argon2-cuda
+        lib/argon2-cuda
+    )
+    target_link_libraries(argon2-cuda PUBLIC argon2-gpu-common)
 endif()
 
-target_include_directories(argon2-cuda INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+target_include_directories(argon2-cuda
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
-target_include_directories(argon2-cuda PRIVATE
-    include/argon2-cuda
-    lib/argon2-cuda
-)
-target_link_libraries(argon2-cuda argon2-gpu-common)
 
 # ============================================================
-#  OpenCL backend
+#  argon2-opencl -- OpenCL backend
 # ============================================================
 add_library(argon2-opencl STATIC
     lib/argon2-opencl/device.cpp
@@ -102,20 +140,18 @@ add_library(argon2-opencl STATIC
     lib/argon2-opencl/processingunit.cpp
     lib/argon2-opencl/kernelrunner.cpp
 )
-target_include_directories(argon2-opencl INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-target_include_directories(argon2-opencl PRIVATE
-    include/argon2-opencl
-    lib/argon2-opencl
+target_include_directories(argon2-opencl
+    PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE include/argon2-opencl
+            lib/argon2-opencl
 )
 target_link_libraries(argon2-opencl
-    argon2-gpu-common ${OpenCL_LIBRARIES}
+    PUBLIC  argon2-gpu-common
+    PRIVATE OpenCL::OpenCL
 )
 
 # ============================================================
-#  mm_gpu_gate — shared library (the actual GPU gate)
+#  mm_gpu_gate -- final shared library
 # ============================================================
 set(GATE_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/../argon2d-gpu-gate.cpp)
 if(NOT EXISTS ${GATE_SOURCE})
@@ -130,23 +166,28 @@ target_include_directories(mm_gpu_gate PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include/argon2-cuda
     ${CMAKE_CURRENT_SOURCE_DIR}/include/argon2-opencl
 )
-
-# Link with the static backends and required system libs
 target_link_libraries(mm_gpu_gate
-    argon2-cuda
-    argon2-opencl
-    argon2-gpu-common
-    ${OpenCL_LIBRARIES}
+    PRIVATE
+        argon2-cuda
+        argon2-opencl
+        argon2-gpu-common
+        OpenCL::OpenCL
 )
-
-if(CUDA_FOUND)
-    target_link_libraries(mm_gpu_gate ${CUDA_LIBRARIES})
+if(HAVE_CUDA)
+    target_link_libraries(mm_gpu_gate PRIVATE CUDA::cudart)
 endif()
 
-# Ensure output is libmm_gpu_gate so configure.ac AC_CHECK_FILE finds it
+# bat expects the output named libmm_gpu_gate.dll
 if(MSVC)
-    set_target_properties(mm_gpu_gate PROPERTIES PREFIX "lib" SUFFIX ".dll"
-        IMPORT_PREFIX "lib" IMPORT_SUFFIX ".dll.a")
+    set_target_properties(mm_gpu_gate PROPERTIES
+        PREFIX        "lib"
+        SUFFIX        ".dll"
+        IMPORT_PREFIX "lib"
+        IMPORT_SUFFIX ".dll.a"
+    )
 elseif(MINGW)
-    set_target_properties(mm_gpu_gate PROPERTIES PREFIX "lib" SUFFIX ".dll")
+    set_target_properties(mm_gpu_gate PROPERTIES
+        PREFIX "lib"
+        SUFFIX ".dll"
+    )
 endif()
