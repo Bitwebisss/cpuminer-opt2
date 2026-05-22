@@ -91,9 +91,14 @@ echo.
 
 set "GPU_SRC_FWD=%GPU_SRC:\=/%"
 set "OPENCL_LIB_FWD=%GPU_BUILD:\=/%"
-set "OPENCL_INC_FWD=C:/msys64/ucrt64/include"
-
-set "OpenCL_ROOT=C:\msys64\ucrt64"
+:: Copy ONLY CL/ headers to clean dir -- prevents MSVC pulling in GCC system headers
+set "OPENCL_HEADERS_CLEAN=%GPU_BUILD%\opencl-headers"
+if exist "%OPENCL_HEADERS_CLEAN%" rmdir /s /q "%OPENCL_HEADERS_CLEAN%"
+mkdir "%OPENCL_HEADERS_CLEAN%\CL"
+xcopy /s /y "C:\msys64\ucrt64\include\CL\*" "%OPENCL_HEADERS_CLEAN%\CL\" >nul
+if errorlevel 1 echo ERROR: failed to copy OpenCL headers
+if errorlevel 1 goto :fail
+set "OPENCL_INC_FWD=%OPENCL_HEADERS_CLEAN:\=/%"
 
 echo [3/5] cmake configure...
 cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DCMAKE_BUILD_TYPE=Release -DOpenCL_LIBRARY="%OPENCL_LIB_FWD%/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%OPENCL_INC_FWD%"
