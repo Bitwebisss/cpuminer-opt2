@@ -54,17 +54,6 @@ RELEASE_NOGPU="$PROJECT_DIR/release-windows/nogpu"
 DEFAULT_CFLAGS="-maes -O3 -Wall"
 DEFAULT_CFLAGS_OLD="-O3 -Wall"
 
-# Full static link: all ucrt64 libraries (curl, gmp, openssl, jansson, …) are
-# bundled directly into the exe.  The only dynamic dependency that remains is
-# OpenCL.dll which is a system DLL shipped with every GPU driver and therefore
-# does not need to be distributed alongside the exe.
-# For the GPU build: libmm_gpu_gate.dll is a DLL by design (loaded at runtime);
-# the linker finds libmm_gpu_gate.dll.a (import lib) and no libmm_gpu_gate.a,
-# so it correctly keeps it dynamic even under -static.
-# cudart is handled via CUDA::cudart_static in CMakeLists.txt — already baked
-# into libmm_gpu_gate.dll itself.
-BASE_LDFLAGS="-L/ucrt64/lib -static"
-
 info "Project dir : $PROJECT_DIR"
 info "GPU gate dir: $GPU_GATE_DIR"
 info "No-GPU only : $NO_GPU"
@@ -113,7 +102,7 @@ fi
 # ============================================================
 #  CONFIGURE ARGS
 # ============================================================
-CONF_BASE="--with-curl=/ucrt64 --host=x86_64-w64-mingw32 CPPFLAGS=-I/ucrt64/include"
+CONF_BASE="--with-curl=/ucrt64 --host=x86_64-w64-mingw32 LDFLAGS=-L/ucrt64/lib CPPFLAGS=-I/ucrt64/include"
 CONF_GPU="--enable-gpu --with-mm-gpu-gate=$GPU_GATE_DIR $CONF_BASE"
 CONF_NOGPU="$CONF_BASE"
 
@@ -138,7 +127,6 @@ build_variant() {
     make clean 2>/dev/null || true
     rm -f config.status
     export CFLAGS="$cflags"
-    export LDFLAGS="$BASE_LDFLAGS"
     ./configure $conf_args 2>&1 | grep -E "(checking|error|warning)" | tail -5 || true
     make -j$(nproc) 2>&1 | tail -3
     strip -s cpuminer.exe
@@ -190,11 +178,10 @@ build_variant "-msse2 $DEFAULT_CFLAGS_OLD"                  "cpuminer-sse2.exe" 
 info ""
 info "Copying runtime DLLs..."
 
-# With full -static linking all ucrt64 libraries are bundled in the exe.
-# The only remaining dynamic dependency is OpenCL.dll which is a system DLL
-# present on every machine with a GPU driver — no need to distribute it.
-# For the GPU build we still need to ship libmm_gpu_gate.dll (it IS the GPU
-# runtime, not a redistributable dep) and the OpenCL kernel source.
+# All exe variants share identical DLL dependencies — only -march differs, not linkage.
+# Running ldd on cpuminer-sse2.exe is sufficient for the full dependency list.
+# For GPU builds libmm_gpu_gate.dll is added so its own ucrt64 deps are included too,
+# matching the manual deploy step from the build guide exactly.
 
 if [ "$NO_GPU" = "0" ]; then
     cp "$GPU_GATE_DIR/libmm_gpu_gate.dll" "$RELEASE_GPU/"
@@ -202,10 +189,20 @@ if [ "$NO_GPU" = "0" ]; then
     mkdir -p "$RELEASE_GPU/data/kernels"
     cp "$PROJECT_DIR/algo/argon2d/argon2-gpu/data/kernels/argon2_kernel.cl" "$RELEASE_GPU/data/kernels/"
     info "  Copied: argon2_kernel.cl"
-    info "  (no ucrt64 runtime DLLs needed — fully static exe)"
+    (cd "$RELEASE_GPU" && ldd cpuminer-sse2.exe libmm_gpu_gate.dll 2>/dev/null \
+        | grep "ucrt64" \
+        | awk '{print $3}' \
+        | sort -u \
+        | xargs -I{} cp {} .)
+    info "  Runtime DLLs copied to $RELEASE_GPU"
 fi
 
-info "  (no-GPU build: exe is fully self-contained)"
+(cd "$RELEASE_NOGPU" && ldd cpuminer-sse2.exe 2>/dev/null \
+    | grep "ucrt64" \
+    | awk '{print $3}' \
+    | sort -u \
+    | xargs -I{} cp {} .)
+info "  Runtime DLLs copied to $RELEASE_NOGPU"
 
 # ============================================================
 #  COPY DOCUMENTATION
