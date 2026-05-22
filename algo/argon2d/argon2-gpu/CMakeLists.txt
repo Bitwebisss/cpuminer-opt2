@@ -17,11 +17,13 @@ endif()
 # ============================================================
 #  OpenCL
 #  Caller passes: -DOpenCL_LIBRARY=... -DOpenCL_INCLUDE_DIR=...
+#  find_package(OpenCL) consumes those variables as hints directly.
 # ============================================================
 find_package(OpenCL REQUIRED)
 
 # ============================================================
 #  CUDA (modern CUDAToolkit, requires CMake 3.17+)
+#  find_package(CUDAToolkit) auto-detects via CUDA_PATH env var.
 #  Caller passes: -DNO_CUDA=FALSE to enable GPU build.
 # ============================================================
 set(HAVE_CUDA FALSE)
@@ -29,6 +31,12 @@ set(HAVE_CUDA FALSE)
 if(NOT NO_CUDA)
     find_package(CUDAToolkit QUIET)
     if(CUDAToolkit_FOUND)
+        # Target GPU architectures (same as original -gencode flags):
+        #   61        Pascal   (GTX 10xx)
+        #   75        Turing   (RTX 20xx, GTX 16xx)
+        #   80        Ampere   (A100)
+        #   86-real   Ampere RTX 30xx  (binary code)
+        #   86-virtual PTX for forward compatibility (was compute_86,compute_86)
         set(CMAKE_CUDA_ARCHITECTURES 61 75 80 86-real 86-virtual)
         enable_language(CUDA)
         set(HAVE_CUDA TRUE)
@@ -45,11 +53,13 @@ if(NOT HAVE_CUDA)
 endif()
 
 # ============================================================
-#  CUDA compiler flags
+#  CUDA compiler flags (replaces legacy CUDA_NVCC_FLAGS).
+#  Applied only to .cu files via COMPILE_LANGUAGE:CUDA generator expression.
 # ============================================================
 if(HAVE_CUDA)
     set(CUDA_EXTRA_FLAGS -O3 --ptxas-options=-v -lineinfo)
     if(MSVC)
+        # Force nvcc to use the same dynamic CRT (/MD) as the rest of the project.
         list(APPEND CUDA_EXTRA_FLAGS -Xcompiler=/MD)
     else()
         list(APPEND CUDA_EXTRA_FLAGS --compiler-options=-fPIC)
@@ -72,12 +82,7 @@ target_include_directories(argon2-gpu-common
 )
 
 # ============================================================
-#  argon2-cuda -- CUDA backend or stub (nocuda.cpp)
-#
-#  nocuda.cpp is a BUILD-TIME stub: used when CUDA SDK is absent
-#  (NO_CUDA=TRUE) so the build succeeds without CUDA support.
-#  It is NOT a runtime fallback — for runtime AMD/OpenCL support
-#  on a CUDA-enabled build, /DELAYLOAD:nvcuda.dll handles that.
+#  argon2-cuda -- CUDA backend or stub
 # ============================================================
 if(HAVE_CUDA)
     add_library(argon2-cuda STATIC
@@ -105,9 +110,6 @@ if(HAVE_CUDA)
         PRIVATE CUDA::cudart_static
     )
 else()
-    # nocuda.cpp = intentionally empty file, produces an empty .a
-    # so that targets linking argon2-cuda don't break when CUDA SDK
-    # is not installed on the build machine.
     add_library(argon2-cuda STATIC
         lib/argon2-cuda/nocuda.cpp
     )
@@ -166,26 +168,13 @@ target_link_libraries(mm_gpu_gate
         argon2-gpu-common
         OpenCL::OpenCL
 )
-
 if(HAVE_CUDA)
     target_link_libraries(mm_gpu_gate PRIVATE CUDA::cudart_static)
     if(MSVC)
-        # /DELAYLOAD:nvcuda.dll — nvcuda.dll is the NVIDIA driver DLL.
-        # Without delay-load it appears in the import table and Windows
-        # tries to resolve it at startup, which fails on AMD/Intel systems
-        # where no NVIDIA driver is installed.
-        #
-        # With delay-load, nvcuda.dll is resolved only on the first actual
-        # CUDA call. The gate already routes all calls through use_gpu[0]=='C',
-        # so on OpenCL systems nvcuda.dll is never touched at all.
-        #
-        # delayimp.lib provides __delayLoadHelper2 (built into MSVC SDK,
-        # no extra download needed).
-        target_link_options(mm_gpu_gate PRIVATE
-            /DELAYLOAD:nvcuda.dll
-            /NODEFAULTLIB:LIBCMT
-        )
-        target_link_libraries(mm_gpu_gate PRIVATE delayimp)
+        # cudart_static brings in LIBCMT (static CRT); the rest of the project
+        # uses /MD (MultiThreadedDLL).  /NODEFAULTLIB:LIBCMT resolves LNK4098
+        # by telling the linker to ignore the conflicting static CRT reference.
+        target_link_options(mm_gpu_gate PRIVATE /NODEFAULTLIB:LIBCMT)
     endif()
 endif()
 
