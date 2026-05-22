@@ -101,7 +101,7 @@ if errorlevel 1 goto :fail
 set "OPENCL_INC_FWD=%OPENCL_HEADERS_CLEAN:\=/%"
 
 echo [3/5] cmake configure...
-cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DCMAKE_BUILD_TYPE=Release -DOpenCL_LIBRARY="%OPENCL_LIB_FWD%/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%OPENCL_INC_FWD%"
+cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DOpenCL_LIBRARY="%OPENCL_LIB_FWD%/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%OPENCL_INC_FWD%"
 if errorlevel 1 echo ERROR: cmake failed
 if errorlevel 1 goto :fail
 echo [3/5] cmake OK.
