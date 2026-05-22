@@ -11,9 +11,6 @@
 #   CPUMINER_GPU_GATE_WIN="C:/cpuminer-opt3/algo/argon2d/argon2-gpu/build_vs/Release" \
 #   bash build-windows-stage2.sh
 #
-#   # Quick test: build only one variant (e.g. sse2) and then package
-#   QUICK_TEST=1 QUICK_VARIANT="cpuminer-sse2.exe" bash build-windows-stage2.sh --no-gpu
-#
 # Builds: SSE2, AES+SSE4.2, AVX, AVX2, AVX2+SHA, AVX2+SHA+VAES, AVX512, AVX512+SHA+VAES
 # Output: cpuminer-windows-gpu.zip and/or cpuminer-windows-nogpu.zip in project root
 
@@ -29,9 +26,16 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 # ============================================================
-#  QUICK TEST MODE (build only one variant)
+#  QUICK TEST MODE - BUILD ONLY ONE VARIANT
 # ============================================================
-# Set environment variables QUICK_TEST=1 and QUICK_VARIANT="cpuminer-xxx.exe"
+# Чтобы включить быструю сборку (только один exe-файл),
+# раскомментируйте следующие две строки и при необходимости
+# укажите нужное имя варианта (например, cpuminer-sse2.exe):
+#
+# QUICK_TEST=1
+# QUICK_VARIANT="cpuminer-sse2.exe"
+#
+# По умолчанию выключено (строятcя все 8 вариантов).
 QUICK_TEST=${QUICK_TEST:-0}
 QUICK_VARIANT=${QUICK_VARIANT:-"cpuminer-sse2.exe"}
 
