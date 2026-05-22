@@ -81,7 +81,7 @@ echo [3/5] cmake configure...
 if exist "%GPU_BUILD%" rmdir /s /q "%GPU_BUILD%"
 mkdir "%GPU_BUILD%"
 cd /d "%GPU_BUILD%"
-cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DCMAKE_BUILD_TYPE=Release -DCUDA_TOOLKIT_ROOT_DIR="%CUDA_PATH_FWD%" -DOpenCL_LIBRARY="%CUDA_PATH_FWD%/lib/x64/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%CUDA_PATH_FWD%/include"
+cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DCMAKE_BUILD_TYPE=Release -DOpenCL_LIBRARY="%CUDA_PATH_FWD%/lib/x64/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%CUDA_PATH_FWD%/include"
 if errorlevel 1 echo ERROR: cmake failed
 if errorlevel 1 goto :fail
 echo [3/5] cmake OK.

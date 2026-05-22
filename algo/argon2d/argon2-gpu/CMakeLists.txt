@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18...3.27)
+cmake_minimum_required(VERSION 3.18...4.0)
 
 project(argon2-gpu CXX)
 
@@ -23,11 +23,7 @@ find_package(OpenCL REQUIRED)
 
 # ============================================================
 #  CUDA (modern CUDAToolkit, requires CMake 3.17+)
-#
-#  Caller passes: -DCUDA_TOOLKIT_ROOT_DIR=...
-#  find_package(CUDAToolkit) officially honours CUDA_TOOLKIT_ROOT_DIR
-#  as a search hint alongside CUDAToolkit_ROOT and CUDA_PATH.
-#
+#  find_package(CUDAToolkit) auto-detects via CUDA_PATH env var.
 #  Caller passes: -DNO_CUDA=FALSE to enable GPU build.
 # ============================================================
 set(HAVE_CUDA FALSE)
@@ -48,7 +44,6 @@ if(NOT NO_CUDA)
         add_compile_definitions(HAVE_CUDA=1)
     else()
         message(STATUS "CUDAToolkit not found -- building without CUDA")
-        add_compile_definitions(HAVE_CUDA=0)
     endif()
 endif()
 
@@ -184,10 +179,5 @@ if(MSVC)
         SUFFIX        ".dll"
         IMPORT_PREFIX "lib"
         IMPORT_SUFFIX ".dll.a"
-    )
-elseif(MINGW)
-    set_target_properties(mm_gpu_gate PROPERTIES
-        PREFIX "lib"
-        SUFFIX ".dll"
     )
 endif()

@@ -186,10 +186,44 @@ build_variant "-msse2 $DEFAULT_CFLAGS_OLD"                  "cpuminer-sse2.exe" 
 info ""
 info "Copying runtime DLLs..."
 
-# All exe variants share identical DLL dependencies — only -march differs, not linkage.
-# Running ldd on cpuminer-sse2.exe is sufficient for the full dependency list.
-# For GPU builds libmm_gpu_gate.dll is added so its own ucrt64 deps are included too,
-# matching the manual deploy step from the build guide exactly.
+copy_runtime_dlls() {
+    local rel_dir="$1"
+    local changed=1
+
+    # Loop until no new DLLs are found — captures transitive dependencies
+    while [ "$changed" = "1" ]; do
+        changed=0
+        local targets
+        targets=$(find "$rel_dir" -maxdepth 1 \( -name "*.exe" -o -name "*.dll" \) 2>/dev/null)
+        [ -z "$targets" ] && break
+
+        local dlls
+        dlls=$(ldd $targets 2>/dev/null \
+            | grep -i "ucrt64\|mingw" \
+            | awk '{print $3}' \
+            | grep "^/" \
+            | sort -u)
+
+        for dll in $dlls; do
+            local name
+            name=$(basename "$dll")
+            if [ -f "$dll" ] && [ ! -f "$rel_dir/$name" ]; then
+                cp "$dll" "$rel_dir/"
+                info "  Copied: $name"
+                changed=1
+            fi
+        done
+    done
+
+    # Validate: no unresolved dependencies must remain
+    local targets
+    targets=$(find "$rel_dir" -maxdepth 1 \( -name "*.exe" -o -name "*.dll" \) 2>/dev/null)
+    local missing
+    missing=$(ldd $targets 2>/dev/null | grep "not found" | awk '{print $1}' | sort -u)
+    if [ -n "$missing" ]; then
+        error "Missing DLLs after copy in $rel_dir:\n$missing"
+    fi
+}
 
 if [ "$NO_GPU" = "0" ]; then
     cp "$GPU_GATE_DIR/libmm_gpu_gate.dll" "$RELEASE_GPU/"
@@ -197,19 +231,11 @@ if [ "$NO_GPU" = "0" ]; then
     mkdir -p "$RELEASE_GPU/data/kernels"
     cp "$PROJECT_DIR/algo/argon2d/argon2-gpu/data/kernels/argon2_kernel.cl" "$RELEASE_GPU/data/kernels/"
     info "  Copied: argon2_kernel.cl"
-    (cd "$RELEASE_GPU" && ldd cpuminer-sse2.exe libmm_gpu_gate.dll 2>/dev/null \
-        | grep "ucrt64" \
-        | awk '{print $3}' \
-        | sort -u \
-        | xargs -I{} cp {} .)
+    copy_runtime_dlls "$RELEASE_GPU"
     info "  Runtime DLLs copied to $RELEASE_GPU"
 fi
 
-(cd "$RELEASE_NOGPU" && ldd cpuminer-sse2.exe 2>/dev/null \
-    | grep "ucrt64" \
-    | awk '{print $3}' \
-    | sort -u \
-    | xargs -I{} cp {} .)
+copy_runtime_dlls "$RELEASE_NOGPU"
 info "  Runtime DLLs copied to $RELEASE_NOGPU"
 
 # ============================================================
