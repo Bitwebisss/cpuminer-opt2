@@ -16,6 +16,13 @@
 
 set -e
 
+# ============================================================
+#  QUICK TEST MODE (build only one variant)
+#  Set QUICK_TEST=1 and adjust QUICK_VARIANT if needed
+# ============================================================
+QUICK_TEST=0                # 0 = build all, 1 = build only one variant
+QUICK_VARIANT="cpuminer-sse2.exe"   # executable name to build when QUICK_TEST=1
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -24,20 +31,6 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
-
-# ============================================================
-#  QUICK TEST MODE - BUILD ONLY ONE VARIANT
-# ============================================================
-# Чтобы включить быструю сборку (только один exe-файл),
-# раскомментируйте следующие две строки и при необходимости
-# укажите нужное имя варианта (например, cpuminer-sse2.exe):
-#
-# QUICK_TEST=1
-# QUICK_VARIANT="cpuminer-sse2.exe"
-#
-# По умолчанию выключено (строятcя все 8 вариантов).
-QUICK_TEST=${QUICK_TEST:-0}
-QUICK_VARIANT=${QUICK_VARIANT:-"cpuminer-sse2.exe"}
 
 # ============================================================
 #  RESOLVE PROJECT DIR
