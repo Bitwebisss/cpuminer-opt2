@@ -40,9 +40,6 @@ echo [CHECK] CUDA nvcc...
 if not exist "%CUDA_PATH%\bin\nvcc.exe" echo MISSING: %CUDA_PATH%\bin\nvcc.exe
 if not exist "%CUDA_PATH%\bin\nvcc.exe" goto :fail
 
-echo [CHECK] OpenCL.lib...
-if not exist "%CUDA_PATH%\lib\x64\OpenCL.lib" echo MISSING: %CUDA_PATH%\lib\x64\OpenCL.lib
-if not exist "%CUDA_PATH%\lib\x64\OpenCL.lib" goto :fail
 
 echo [CHECK] MSYS2...
 if not exist "%MSYS2_BASH%" echo MISSING: %MSYS2_BASH%
@@ -74,14 +71,26 @@ if errorlevel 1 goto :fail
 echo [2/5] Done.
 echo.
 
-set "CUDA_PATH_FWD=%CUDA_PATH:\=/%"
-set "GPU_SRC_FWD=%GPU_SRC:\=/%"
-
-echo [3/5] cmake configure...
+echo [2/5] Generating OpenCL.lib from MSYS2 OpenCL.dll...
 if exist "%GPU_BUILD%" rmdir /s /q "%GPU_BUILD%"
 mkdir "%GPU_BUILD%"
 cd /d "%GPU_BUILD%"
-cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DCMAKE_BUILD_TYPE=Release -DOpenCL_LIBRARY="%CUDA_PATH_FWD%/lib/x64/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%CUDA_PATH_FWD%/include"
+"%GENDEF%" "C:\msys64\ucrt64\bin\OpenCL.dll"
+if errorlevel 1 echo ERROR: gendef OpenCL.dll failed
+if errorlevel 1 goto :fail
+lib.exe /def:OpenCL.def /out:OpenCL.lib /machine:x64 /nologo
+if errorlevel 1 echo ERROR: lib.exe OpenCL.lib failed
+if errorlevel 1 goto :fail
+echo   OpenCL.lib generated OK
+echo.
+
+set "GPU_SRC_FWD=%GPU_SRC:\=/%"
+set "OPENCL_LIB_FWD=%GPU_BUILD:\=/%"
+set "OPENCL_INC=C:\msys64\ucrt64\include"
+set "OPENCL_INC_FWD=%OPENCL_INC:\=/%"
+
+echo [3/5] cmake configure...
+cmake "%GPU_SRC_FWD%" -G "Visual Studio 16 2019" -A x64 -DNO_CUDA=FALSE -DCMAKE_BUILD_TYPE=Release -DOpenCL_LIBRARY="%OPENCL_LIB_FWD%/OpenCL.lib" -DOpenCL_INCLUDE_DIR="%OPENCL_INC_FWD%"
 if errorlevel 1 echo ERROR: cmake failed
 if errorlevel 1 goto :fail
 echo [3/5] cmake OK.
