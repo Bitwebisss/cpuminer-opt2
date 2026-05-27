@@ -10,8 +10,7 @@ echo.
 
 set "MSYS2_BASH=C:\msys64\usr\bin\bash.exe"
 
-set "PROJECT=%~dp0"
-if "%PROJECT:~-1%"=="\" set "PROJECT=%PROJECT:~0,-1%"
+for %%I in ("%~dp0.") do set "PROJECT=%%~fI"
 
 echo Project: %PROJECT%
 echo.
