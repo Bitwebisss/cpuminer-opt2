@@ -178,13 +178,18 @@ verify_and_copy_gpu_files() {
 #  build_variant  CFLAGS  NAME  CONF_ARGS  OUT_DIR
 #
 #  Sequence per variant:
-#    1. make clean           — remove ALL object files and exe
-#    2. rm config.status     — force full reconfigure
-#    3. ./configure          — fresh configure with current flags
-#    4. make -j              — compile
-#    5. strip + copy exe
-#    6. verify_and_copy_dlls — runtime DLL check (fail-fast)
-#    7. verify_and_copy_gpu_files — GPU file check (fail-fast)
+#    1. make distclean       — removes .o, exe, Makefile, config.status,
+#                              config.cache, config.log — NO leftovers
+#    2. ./configure          — 100% fresh configure with current flags
+#    3. make -j              — compile
+#    4. strip + copy exe
+#    5. verify_and_copy_dlls — runtime DLL check (fail-fast)
+#    6. verify_and_copy_gpu_files — GPU file check (fail-fast)
+#
+#  WHY distclean and NOT (make clean + rm config.status):
+#    make clean   leaves config.cache — cached ./configure results that
+#    can bleed into the next variant (wrong arch flags, wrong GPU flags).
+#    make distclean wipes everything ./configure ever wrote.
 # ============================================================
 build_variant() {
     local cflags="$1"
@@ -200,9 +205,10 @@ build_variant() {
     info ""
     info "  ── Building $name ──"
 
-    # Full clean: obj files, exe, and configure state
-    make clean 2>/dev/null || true
-    rm -f config.status
+    # Full clean: wipes obj files, exe, Makefile, config.cache, config.status,
+    # config.log — everything ./configure wrote. Prevents ANY bleed between
+    # variants (different CPU arch flags, GPU vs no-GPU flags, cached values).
+    make distclean 2>/dev/null || true
 
     export CFLAGS="$cflags"
     ./configure $conf_args 2>&1 | grep -E "(checking|error|warning)" | tail -5 || true
@@ -227,6 +233,11 @@ info ""
 info "========================================"
 info "  Building GPU variants (8 CPU archs)"
 info "========================================"
+
+# Wipe release dir once before starting — ensures no stale exe/dll
+# from a previous run (including an outdated libmm_gpu_gate.dll copy).
+info "Cleaning release dir: $RELEASE_GPU"
+rm -rf "$RELEASE_GPU"
 mkdir -p "$RELEASE_GPU"
 
 build_variant "-march=icelake-client $DEFAULT_CFLAGS"       "cpuminer-avx512-sha-vaes.exe" "$CONF_GPU" "$RELEASE_GPU"
