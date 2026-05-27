@@ -3,8 +3,8 @@ setlocal
 
 echo ============================================================
 echo  cpuminer-opt3 Windows Build  [GPU ONLY]
-echo  Stage 1: VS2019 + CUDA  ->  libmm_gpu_gate.dll
-echo  Stage 2: MSYS2 UCRT64  ->  cpuminer*-GPU.exe  (8 CPU archs)
+echo  Stage 1: VS2019 + CUDA  -^>  libmm_gpu_gate.dll
+echo  Stage 2: MSYS2 UCRT64  -^>  cpuminer*-GPU.exe  (8 CPU archs)
 echo ============================================================
 echo.
 
