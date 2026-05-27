@@ -164,7 +164,7 @@ build_variant() {
     # variants (different CPU arch flags, cached values).
     # The explicit rm is a safety net in case distclean is unavailable
     # (no Makefile on first run, or distclean not defined in this autotools version).
-    make distclean >/dev/null 2>&1 || true
+    make distclean 2>/dev/null || true
     rm -f config.cache config.status config.log
 
     export CFLAGS="$cflags"
